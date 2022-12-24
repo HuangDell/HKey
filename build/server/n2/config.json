@@ -1,0 +1,6 @@
+{
+  "protocol": "tcp",
+  "ip": "localhost",
+  "port": "5002",
+  "version": "v1.0"
+}
