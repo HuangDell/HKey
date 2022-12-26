@@ -28,9 +28,9 @@ type HKey struct {
 	store   *handler
 }
 
-func NewHKey() *HKey {
+func NewHKey(data_path string) *HKey {
 	hkey := new(HKey)
-	hkey.store = newHandler()
+	hkey.store = newHandler(data_path)
 	hkey.deleted = make([]byte, 1)
 	hkey.hashVal = make([]byte, 16)
 	hkey.key = make([]byte, KEY_MAK_LEN)

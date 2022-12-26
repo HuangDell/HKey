@@ -25,6 +25,15 @@ func (this *Client) Close() {
 	this.conn.Close()
 }
 
+func (this *Client) Command(command string) (string, error) {
+	var ans string
+	err := this.conn.Call("Raft.Command", command, &ans)
+	if err != nil {
+		return ans, fmt.Errorf("服务器错误 %s", err)
+	}
+	return ans, nil
+}
+
 // Set 插入键或者更新键值
 func (this *Client) Set(key string, value string) error {
 	var ans string

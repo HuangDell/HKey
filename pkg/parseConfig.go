@@ -12,6 +12,7 @@ type Config struct {
 	Ip       string `json:"ip"`
 	Port     string `json:"port"`
 	Version  string `json:"version"`
+	Raft     string `json:"raft"`
 }
 
 // GetAddress 获得完整地址

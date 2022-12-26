@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strings"
 )
 
 var client HKey.Client
@@ -41,25 +40,16 @@ func command() {
 		fmt.Printf("HKey>")
 		bytes, _, _ := reader.ReadLine()
 		input := string(bytes)
-		words := strings.Split(input, " ")
-		action := words[0]
-		switch action {
-		case "set":
-			set(words)
-		case "get":
-			get(words)
-		case "del":
-			del(words)
-		case "exists":
-			exists(words)
-		case "exit":
-			client.Close()
-			goto end
-		default:
-			fmt.Println("Unknown command")
+		if input == "exit" {
+			break
 		}
+		ans, err := client.Command(input)
+		if err != nil {
+			fmt.Printf("%v", err)
+			break
+		}
+		fmt.Println(ans)
 	}
-end:
 	fmt.Println("bye")
 }
 
