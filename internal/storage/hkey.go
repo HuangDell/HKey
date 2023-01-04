@@ -14,6 +14,7 @@ const VALUE_MAX_LEN = 64 // 设定value的最大长度为64字节
 const KEY_MAK_LEN = 16   // 设定key得最大长度为16字节
 const DELETED_LEN = 1    // 标识字段
 const DATA_LEN = INT_SIZE + KEY_MAK_LEN + VALUE_MAX_LEN + 16 + DELETED_LEN
+const CACHE_LEN = 50 // 设置缓存大小
 
 type sbshdr struct {
 	len int
@@ -26,6 +27,7 @@ type HKey struct {
 	hashVal []byte
 	value   sbshdr
 	store   *handler
+	cache   *Cache
 }
 
 func NewHKey(data_path string) *HKey {
@@ -35,6 +37,7 @@ func NewHKey(data_path string) *HKey {
 	hkey.hashVal = make([]byte, 16)
 	hkey.key = make([]byte, KEY_MAK_LEN)
 	hkey.value.buf = make([]byte, VALUE_MAX_LEN)
+	hkey.cache = NewCache(CACHE_LEN)
 	return hkey
 }
 
@@ -46,6 +49,7 @@ func (this *HKey) insert(key string, value string) error {
 	copy(this.hashVal, temp[:])
 	copy(this.key, key)
 	copy(this.value.buf, value)
+	this.cache.Append(key, value)
 	this.store.write(this)
 	pkg.Clear(this.hashVal) // TODO 也许可以不用clear
 	pkg.Clear(this.key)
@@ -55,12 +59,23 @@ func (this *HKey) insert(key string, value string) error {
 
 func (this *HKey) get(key string) (string, error) {
 	copy(this.key, key)
+	ans := this.cache.Get(key) // 先尝试在缓存中读取
+	if ans != "nil" {
+		return ans, nil
+	}
 	defer pkg.Clear(this.key)
 	pos, err := this.store.find(this)
 	if err != nil {
 		return "", err
 	}
-	return this.store.read(pos)
+	ans, err = this.store.read(pos) // 缓存中没有找到会在文件中进行查找
+	if err != nil {
+		return "", err
+	}
+	if ans != "nil" { // 在文件中查找成功，则添加到缓存中
+		this.cache.Append(key, ans)
+	}
+	return ans, err
 }
 
 // update
@@ -69,6 +84,7 @@ func (this *HKey) update(key string, value string, pos int) {
 	copy(this.hashVal, temp[:])
 	copy(this.key, key)
 	copy(this.value.buf, value)
+	this.cache.Update(key, value) // 先更新cache中
 	this.store.update(this, pos)
 	pkg.Clear(this.hashVal) // TODO 也许可以不用clear
 	pkg.Clear(this.key)
@@ -90,6 +106,7 @@ func (this *HKey) delete(key string) (string, error) {
 	if pos == -1 {
 		return "(integer) 0", nil
 	}
+	this.cache.Remove(key)
 	err = this.store.delete(pos)
 	if err != nil {
 		return "", err

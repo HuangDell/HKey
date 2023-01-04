@@ -2,6 +2,7 @@ package server
 
 import (
 	"HKey/internal/storage"
+	"HKey/pkg"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -21,13 +22,13 @@ const (
 const (
 	electionTimeoutMin = 300 * time.Millisecond
 	electionTimeoutMax = 600 * time.Millisecond
-	heartbeatTimeout   = 25 * time.Millisecond
+	heartbeatTimeout   = 100 * time.Millisecond
 	checkTimeout       = 5 * time.Millisecond
 )
 
 func randTime() time.Duration {
 	diff := (electionTimeoutMax - electionTimeoutMin).Milliseconds()
-	return electionTimeoutMin + time.Duration(rand.Intn(int(diff)))*time.Millisecond
+	return electionTimeoutMin + 2*time.Duration(rand.Intn(int(diff))*2)*time.Millisecond
 }
 
 func wait(n int, ch chan bool) {
@@ -70,6 +71,7 @@ func (rf *Raft) GetState() (int, bool) {
 // 修改当前节点状态
 func (rf *Raft) keepOrFollow(term int) {
 	if term > rf.currentTerm { // 新的leader已经出现
+		pkg.DPrintf("新的Leader出现，转变成Follower")
 		rf.currentTerm = term
 		rf.votedFor = -1 // 重置投票
 		rf.role = FOLLOWER
@@ -123,9 +125,10 @@ func (rf *Raft) Start(nodesInfo []InfoArgs, ans *string) error {
 		}
 		rf.peers[idx] = conn
 	}
+	rf.timer.Reset(randTime())
 	// 然后开始工作
-	go rf.work()
 	fmt.Printf("Raft网络 节点：%d构建完成\n", rf.me)
+	go rf.work()
 	return nil
 }
 
@@ -135,12 +138,14 @@ func (rf *Raft) work() {
 		<-rf.timer.C
 		switch rf.role {
 		case FOLLOWER: // 继续工作
+			pkg.DPrintf("Work as Follower\n")
 			rf.mu.Lock()
 			rf.role = CANDIDATE
-			rf.timer.Reset(0)
+			rf.timer.Reset(randTime())
 			rf.mu.Unlock()
 
 		case CANDIDATE: // 当变为candidate时要开始vote
+			pkg.DPrintf("发起新的选举\n")
 			rf.mu.Lock()
 			rf.currentTerm++
 			rf.votedFor = rf.me
@@ -171,7 +176,7 @@ func (rf *Raft) work() {
 				for i := 0; i < len(rf.peers); i++ {
 					rf.nextIndex[i] = m
 				}
-				fmt.Printf("节点%d目前成为Leader\n", rf.me)
+				pkg.DPrintf("节点%d目前成为Leader\n", rf.me)
 			}
 			rf.mu.Unlock()
 
@@ -220,7 +225,6 @@ func (rf *Raft) work() {
 
 // Command 用于处理用户命令  注意只有leader才能处理！
 func (rf *Raft) Command(command string, ans *string) error {
-	fmt.Println("---------------------------------------------")
 	fmt.Printf("Command:%s\nDate:%v\n", command, time.Now().Format("2006-01-02 15:04:05"))
 	fmt.Println("---------------------------------------------")
 	if rf.role != LEADER {
@@ -249,6 +253,8 @@ func (rf *Raft) handleCommand(command string) string {
 		ans = rf.del(words)
 	case "exists":
 		ans = rf.exists(words)
+	case "show":
+		ans = rf.show()
 	default:
 		fmt.Println("Unknown command")
 	}
@@ -313,5 +319,11 @@ func (rf *Raft) exists(words []string) string {
 		fmt.Println(err)
 	}
 	fmt.Println(ans)
+	return ans
+}
+
+func (rf *Raft) show() string {
+	var ans string
+	rf.store.Show(&ans)
 	return ans
 }

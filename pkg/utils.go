@@ -1,5 +1,7 @@
 package pkg
 
+import "log"
+
 // import "HKey/internal/server"
 
 // Clear 将数组置为0
@@ -7,6 +9,16 @@ func Clear(arr []byte) {
 	for i := 0; i < len(arr); i++ {
 		arr[i] = 0
 	}
+}
+
+// Debugging
+const Debug = true
+
+func DPrintf(format string, a ...interface{}) (n int, err error) {
+	if Debug {
+		log.Printf(format, a...)
+	}
+	return
 }
 
 //
