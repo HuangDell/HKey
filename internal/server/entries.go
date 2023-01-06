@@ -31,6 +31,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 		args.PrevLogTerm == rf.log[args.PrevLogIndex].Term { // term和log要匹配
 		if args.PrevLogIndex+1 != len(rf.log) || args.Entries != nil {
 			rf.log = append(rf.log[:args.PrevLogIndex+1], args.Entries...) // 删除不匹配并添加未持有的日志
+			rf.persist()
 		}
 		if args.LeaderCommit > rf.commitIndex {
 			if args.LeaderCommit < len(rf.log) {

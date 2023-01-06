@@ -3,6 +3,8 @@ package server
 import (
 	"HKey/internal/storage"
 	"HKey/pkg"
+	"bytes"
+	"encoding/gob"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -57,7 +59,9 @@ type Raft struct {
 	votes       int       // 得票数
 	nextIndex   []int     // 下一个发送给follower的条目索引
 	matchIndex  []int
-	timer       *time.Timer
+	persister   *Persister // 日志的持久化保存
+
+	timer *time.Timer
 }
 
 func (rf *Raft) GetState() (int, bool) {
@@ -86,7 +90,8 @@ func NewRaft(data_path string, address string, me int) *Raft {
 	rf.log = make([]LogItem, 1)
 	rf.role = FOLLOWER
 	rf.timer = time.NewTimer(randTime())
-
+	rf.persister = NewPersister(data_path)
+	rf.readPersist(rf.persister.ReadRaftState())
 	err := rpc.Register(rf) // 注册Raft
 	if err != nil {
 		panic(err)
@@ -132,6 +137,26 @@ func (rf *Raft) Start(nodesInfo []InfoArgs, ans *string) error {
 	return nil
 }
 
+// 将日志持久化保存
+func (rf *Raft) persist() {
+	w := new(bytes.Buffer)
+	e := gob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	e.Encode(rf.votedFor)
+	e.Encode(rf.log)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
+}
+
+// 从磁盘中读取保存的日志
+func (rf *Raft) readPersist(data []byte) {
+	r := bytes.NewBuffer(data)
+	d := gob.NewDecoder(r)
+	d.Decode(&rf.currentTerm)
+	d.Decode(&rf.votedFor)
+	d.Decode(&rf.log)
+}
+
 // raft集群下的工作
 func (rf *Raft) work() {
 	for rf.me != -1 {
@@ -149,6 +174,7 @@ func (rf *Raft) work() {
 			rf.mu.Lock()
 			rf.currentTerm++
 			rf.votedFor = rf.me
+			rf.persist()
 			rf.votes = 1
 			rf.timer.Reset(randTime())
 			m := len(rf.log)
