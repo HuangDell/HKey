@@ -28,7 +28,7 @@ const (
 	checkTimeout       = 5 * time.Millisecond
 )
 
-func randTime() time.Duration {
+func randTime() time.Duration { // 用于
 	diff := (electionTimeoutMax - electionTimeoutMin).Milliseconds()
 	return electionTimeoutMin + 2*time.Duration(rand.Intn(int(diff))*2)*time.Millisecond
 }
@@ -79,6 +79,21 @@ func (rf *Raft) keepOrFollow(term int) {
 		rf.currentTerm = term
 		rf.votedFor = -1 // 重置投票
 		rf.role = FOLLOWER
+	}
+}
+
+// raft集群下的工作
+func (rf *Raft) work() {
+	for rf.me != -1 {
+		<-rf.timer.C
+		switch rf.role {
+		case FOLLOWER: // 继续工作
+			rf.workAsFollower()
+		case CANDIDATE: // 当变为candidate时要开始vote
+			rf.workAsCandidate()
+		case LEADER: // leader处理日志
+			rf.workAsLeader()
+		}
 	}
 }
 
@@ -157,96 +172,90 @@ func (rf *Raft) readPersist(data []byte) {
 	d.Decode(&rf.log)
 }
 
-// raft集群下的工作
-func (rf *Raft) work() {
-	for rf.me != -1 {
-		<-rf.timer.C
-		switch rf.role {
-		case FOLLOWER: // 继续工作
-			pkg.DPrintf("Work as Follower\n")
-			rf.mu.Lock()
-			rf.role = CANDIDATE
-			rf.timer.Reset(randTime())
-			rf.mu.Unlock()
+func (rf *Raft) workAsFollower() {
+	pkg.DPrintf("Work as Follower\n")
+	rf.mu.Lock()
+	rf.role = CANDIDATE // 选举时间到，转变为Candidate
+	// rf.timer.Reset(randTime())
+	rf.mu.Unlock()
+}
 
-		case CANDIDATE: // 当变为candidate时要开始vote
-			pkg.DPrintf("发起新的选举\n")
-			rf.mu.Lock()
-			rf.currentTerm++
-			rf.votedFor = rf.me
-			rf.persist()
-			rf.votes = 1
-			rf.timer.Reset(randTime())
-			m := len(rf.log)
-			rf.mu.Unlock()
-			args := RequestVoteArgs{rf.currentTerm, rf.me,
-				m - 1, rf.log[m-1].Term}
-			reply := new(RequestVoteReply)
-			ch := make(chan bool)
-			// 对每个节点都进行发送
-			for _, i := range rand.Perm(len(rf.peers)) {
-				rf.mu.Lock()
-				if rf.me != -1 && rf.role == CANDIDATE && i != rf.me {
-					go rf.sendRequestVote(i, args, reply, ch)
+func (rf *Raft) workAsCandidate() {
+	pkg.DPrintf("发起新的选举\n")
+	rf.mu.Lock()
+	rf.currentTerm++
+	rf.votedFor = rf.me
+	rf.persist()
+	rf.votes = 1
+	rf.timer.Reset(randTime()) // 设置下一次选举时间
+	m := len(rf.log)
+	rf.mu.Unlock()
+	args := RequestVoteArgs{rf.currentTerm, rf.me,
+		m - 1, rf.log[m-1].Term}
+	reply := new(RequestVoteReply)
+	ch := make(chan bool)
+	// 对每个节点都进行发送
+	for _, i := range rand.Perm(len(rf.peers)) {
+		rf.mu.Lock()
+		if rf.me != -1 && rf.role == CANDIDATE && i != rf.me {
+			go rf.sendRequestVote(i, args, reply, ch)
+		}
+		rf.mu.Unlock()
+	}
+	wait(len(rf.peers), ch) // 等待所有发收成功或超时
+	rf.mu.Lock()
+	if rf.me != -1 && rf.role == CANDIDATE && 2*rf.votes > len(rf.peers) { // 成功竞选
+		rf.role = LEADER
+		rf.leader = rf.me
+		rf.timer.Reset(0) // 快速转变为Leader
+		for i := 0; i < len(rf.peers); i++ {
+			rf.nextIndex[i] = m
+		}
+		pkg.DPrintf("节点%d目前成为Leader\n", rf.me)
+	}
+	rf.mu.Unlock()
+}
+
+// Leader依据心跳时间执行
+func (rf *Raft) workAsLeader() {
+	rf.mu.Lock()
+	rf.timer.Reset(heartbeatTimeout)
+	m := len(rf.log)
+	duplicate := rf.commitIndex != m-1
+	ch := make(chan bool)
+	for _, i := range rand.Perm(len(rf.peers)) { // 发送心跳
+		if rf.me != -1 && rf.role == LEADER && i != rf.me {
+			if !duplicate { // 此时没有新的日志，只需发送心跳即可
+				go rf.sendHeartbeat(i, HeartbeatArgs{Term: rf.currentTerm, LeaderId: rf.me})
+			} else { // 存在新的日志，则需要发送日志复制
+				args := AppendEntriesArgs{rf.currentTerm, rf.me,
+					rf.nextIndex[i] - 1, rf.log[rf.nextIndex[i]-1].Term,
+					nil, rf.commitIndex}
+				if rf.nextIndex[i] < m {
+					args.Entries = make([]LogItem, m-rf.nextIndex[i])
+					copy(args.Entries, rf.log[rf.nextIndex[i]:m])
 				}
-				rf.mu.Unlock()
+				reply := AppendEntriesReply{}
+				go rf.sendAppendEntries(i, args, &reply, ch)
 			}
-
-			wait(len(rf.peers), ch) // 等待所有发收成功或超时
-
-			rf.mu.Lock()
-			if rf.me != -1 && rf.role == CANDIDATE && 2*rf.votes > len(rf.peers) { // 成功竞选
-				rf.role = LEADER
-				rf.leader = rf.me
-				rf.timer.Reset(0)
-				for i := 0; i < len(rf.peers); i++ {
-					rf.nextIndex[i] = m
-				}
-				pkg.DPrintf("节点%d目前成为Leader\n", rf.me)
-			}
-			rf.mu.Unlock()
-
-		case LEADER: // leader处理日志
-			rf.mu.Lock()
-			rf.timer.Reset(heartbeatTimeout)
-			m := len(rf.log)
-			rf.mu.Unlock()
-			ch := make(chan bool)
-			for _, i := range rand.Perm(len(rf.peers)) { // 随机形式访问节点
-				rf.mu.Lock()
-				if rf.me != -1 && rf.role == LEADER && i != rf.me {
-					args := AppendEntriesArgs{rf.currentTerm, rf.me,
-						rf.nextIndex[i] - 1, rf.log[rf.nextIndex[i]-1].Term,
-						nil, rf.commitIndex}
-					if rf.nextIndex[i] < m {
-						args.Entries = make([]LogItem, m-rf.nextIndex[i])
-						copy(args.Entries, rf.log[rf.nextIndex[i]:m])
-					}
-					reply := AppendEntriesReply{}
-					go rf.sendAppendEntries(i, args, &reply, ch)
-				}
-				rf.mu.Unlock()
-			}
-
-			wait(len(rf.peers), ch) // 等待所有发收成功或超时
-
-			rf.mu.Lock()
-			N := m - 1
-			if rf.me != -1 && rf.role == LEADER && N > rf.commitIndex && rf.log[N].Term == rf.currentTerm {
-				count := 1
-				for i := 0; i < len(rf.peers); i++ {
-					if i != rf.me && rf.matchIndex[i] >= N {
-						count++
-					}
-				}
-				if 2*count > len(rf.peers) { // 确认提交
-					rf.commitIndex = N
-				}
-			}
-			rf.mu.Unlock()
 		}
 	}
-
+	if duplicate { // 如果存在日志复制，还需等待节点响应
+		wait(len(rf.peers), ch) // 等待所有发收成功或超时
+		N := m - 1
+		if rf.me != -1 && rf.role == LEADER && N > rf.commitIndex && rf.log[N].Term == rf.currentTerm {
+			count := 1
+			for i := 0; i < len(rf.peers); i++ {
+				if i != rf.me && rf.matchIndex[i] >= N {
+					count++
+				}
+			}
+			if 2*count > len(rf.peers) { // 确认提交
+				rf.commitIndex = N
+			}
+		}
+	}
+	rf.mu.Unlock()
 }
 
 // Command 用于处理用户命令  注意只有leader才能处理！

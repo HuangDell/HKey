@@ -1,5 +1,7 @@
 package server
 
+import "HKey/pkg"
+
 // 日志处理
 
 type AppendEntriesArgs struct {
@@ -51,20 +53,23 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 }
 
 func (rf *Raft) sendAppendEntries(server int, args AppendEntriesArgs, reply *AppendEntriesReply, ch chan bool) {
-	if err := rf.peers[server].Call("Raft.AppendEntries", args, reply); err != nil {
-		return
+	for true {
+		if err := rf.peers[server].Call("Raft.AppendEntries", args, reply); err != nil {
+			return
+		}
+		rf.keepOrFollow(reply.Term)
+		if rf.role == LEADER && reply.Success {
+			rf.nextIndex[server] = args.PrevLogIndex + len(args.Entries) + 1
+			rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
+			pkg.DPrintf("节点%d接收了日志\n", server)
+			break
+		} else if rf.role == LEADER && !reply.Success { // 节点拒绝了日志
+			rf.nextIndex[server]--
+			pkg.DPrintf("节点%d拒绝了日志，正在尝试重新发送日志\n", server)
+			// for rf.nextIndex[server] >= 0 && rf.log[rf.nextIndex[server]].Term == reply.Term {
+			// 	rf.nextIndex[server]-- // 寻找日志一致的索引
+			// }
+		}
 	}
-	rf.mu.Lock()
-	rf.keepOrFollow(reply.Term)
-	if rf.role == LEADER && reply.Success {
-		rf.nextIndex[server] = args.PrevLogIndex + len(args.Entries) + 1
-		rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
-	} else if rf.role == LEADER && !reply.Success { // 节点拒绝了日志
-		rf.nextIndex[server]--
-		// for rf.nextIndex[server] >= 0 && rf.log[rf.nextIndex[server]].Term == reply.Term {
-		// 	rf.nextIndex[server]-- // 寻找日志一致的索引
-		// }
-	}
-	rf.mu.Unlock()
 	ch <- true
 }
