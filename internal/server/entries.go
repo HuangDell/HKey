@@ -21,17 +21,18 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	reply.Term = rf.currentTerm
-	if args.Term == rf.currentTerm {
+	if args.Term == rf.currentTerm { // 只有Follower才会被调用AppendEntries
 		rf.role = FOLLOWER
 		rf.timer.Reset(randTime()) // term相同重置计时
 	}
 	rf.keepOrFollow(args.Term)
 	if args.Term >= rf.currentTerm &&
-		args.PrevLogIndex < len(rf.log) &&
-		args.PrevLogTerm == rf.log[args.PrevLogIndex].Term { // term和log要匹配
+		args.PrevLogIndex < len(rf.log) && // 如果大于则说明该节点至少缺少了一次日志
+		args.PrevLogTerm == rf.log[args.PrevLogIndex].Term { // 判断存在日志一致的index
 		if args.PrevLogIndex+1 != len(rf.log) || args.Entries != nil {
-			rf.log = append(rf.log[:args.PrevLogIndex+1], args.Entries...) // 删除不匹配并添加未持有的日志
-			rf.persist()
+			// 从日志一致的地方开始向后覆盖
+			rf.log = append(rf.log[:args.PrevLogIndex+1], args.Entries...)
+			rf.persist() // 同时将日志写入文件
 		}
 		if args.LeaderCommit > rf.commitIndex {
 			if args.LeaderCommit < len(rf.log) {
@@ -41,7 +42,7 @@ func (rf *Raft) AppendEntries(args AppendEntriesArgs, reply *AppendEntriesReply)
 			}
 		}
 		rf.leader = args.LeaderId
-		for _, entry := range args.Entries {
+		for _, entry := range args.Entries { // 处理条目
 			rf.handleCommand(entry.Command)
 		}
 		reply.Success = true
@@ -58,11 +59,11 @@ func (rf *Raft) sendAppendEntries(server int, args AppendEntriesArgs, reply *App
 	if rf.role == LEADER && reply.Success {
 		rf.nextIndex[server] = args.PrevLogIndex + len(args.Entries) + 1
 		rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
-	} else if rf.role == LEADER && !reply.Success {
+	} else if rf.role == LEADER && !reply.Success { // 节点拒绝了日志
 		rf.nextIndex[server]--
-		for rf.nextIndex[server] >= 0 && rf.log[rf.nextIndex[server]].Term == reply.Term {
-			rf.nextIndex[server]-- // 跳过同一term的log
-		}
+		// for rf.nextIndex[server] >= 0 && rf.log[rf.nextIndex[server]].Term == reply.Term {
+		// 	rf.nextIndex[server]-- // 寻找日志一致的索引
+		// }
 	}
 	rf.mu.Unlock()
 	ch <- true

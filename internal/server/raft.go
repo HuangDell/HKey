@@ -52,13 +52,13 @@ type Raft struct {
 	me          int
 	commitIndex int // 日志提交index
 	lastApplied int
-	currentTerm int       // 当前Term
-	votedFor    int       // 投票目标
-	log         []LogItem // 日志
-	role        int       // 身份
-	votes       int       // 得票数
-	nextIndex   []int     // 下一个发送给follower的条目索引
-	matchIndex  []int
+	currentTerm int        // 当前Term
+	votedFor    int        // 投票目标
+	log         []LogItem  // 日志
+	role        int        // 身份
+	votes       int        // 得票数
+	nextIndex   []int      // 下一个发送给follower的条目索引
+	matchIndex  []int      // 与follower日志一致的索引
 	persister   *Persister // 日志的持久化保存
 
 	timer *time.Timer
@@ -212,7 +212,7 @@ func (rf *Raft) work() {
 			m := len(rf.log)
 			rf.mu.Unlock()
 			ch := make(chan bool)
-			for _, i := range rand.Perm(len(rf.peers)) {
+			for _, i := range rand.Perm(len(rf.peers)) { // 随机形式访问节点
 				rf.mu.Lock()
 				if rf.me != -1 && rf.role == LEADER && i != rf.me {
 					args := AppendEntriesArgs{rf.currentTerm, rf.me,
