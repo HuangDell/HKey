@@ -1,7 +1,6 @@
 package server
 
 import (
-	"HKey/internal/server/raft"
 	"HKey/pkg"
 	"bufio"
 	"fmt"
@@ -15,20 +14,17 @@ import (
 */
 
 type Server struct {
-	config    pkg.Config      // 配置信息
-	nodesInfo []InfoArgs      // 记录集群中的节点信息
-	peers     []*rpc.Client   // 节点
-	saved     *raft.Persister // 持久化保存
-	raft      *raft.Raft
-	info      chan raft.ApplyMsg
+	config    pkg.Config    // 配置信息
+	nodesInfo []InfoArgs    // 记录集群中的节点信息
+	peers     []*rpc.Client // 节点
+	count     int           // 当前集群节点数
 }
 
 func NewServer() *Server {
 	var err error
 	s := new(Server)
 	s.config, err = pkg.ParseConfig("build/server/config.json")
-	fmt.Println("HKey 集群控制中心正在启动...")
-	s.info = make(chan raft.ApplyMsg)
+	fmt.Println("HKey 引导程序正在启动...")
 	if err != nil {
 		panic(err)
 	}
@@ -47,25 +43,21 @@ func (this *Server) Run() {
 	fmt.Println("输入over结束准备阶段")
 	reader := bufio.NewReader(os.Stdin)
 	for {
-		fmt.Printf("HKey>")
 		bytes, _, _ := reader.ReadLine()
 		input := string(bytes)
 		if input == "over" {
-			this.saved = raft.MakePersister()
-			this.raft = raft.NewRaft(this.peers, 0, this.saved, this.info)
+			this.start()
+			break
 		}
 	}
+	fmt.Println("集群启动成功，引导程序将自动关闭。")
 }
 
-// 将节点之间互相连接
-func (this *Server) nodeConnect() {
-	l := len(this.peers)
-	for i := 0; i < l; i++ {
-		for j := 0; j < l; j++ {
-			if i == j {
-				continue
-			}
-
+func (this *Server) start() {
+	for _, client := range this.peers {
+		err := client.Call("Raft.Start", this.nodesInfo, nil)
+		if err != nil {
+			panic(err)
 		}
 	}
 }
@@ -73,18 +65,14 @@ func (this *Server) nodeConnect() {
 // Join 供节点远程调用的方法
 func (this *Server) Join(args InfoArgs, ans *string) error {
 	conn, err := rpc.DialHTTP(args.Protocol, args.Address) // 控制中心同时连接节点
+	this.count++
 	if err != nil {
 		return err
 	}
 	this.nodesInfo = append(this.nodesInfo, args)
 	this.peers = append(this.peers, conn)
-	fmt.Printf("HKey> 节点:%s 地址:%s 成功加入集群！\n", args.Name, args.Address)
+	fmt.Printf("节点:%s 地址:%s 成功加入集群！\n", args.Name, args.Address)
+	fmt.Printf("集群中节点总数量：%d\n", this.count)
 	*ans = "OK"
-	return nil
-}
-
-// Command 控制中心处理客户的请求，并将实际操作转移到节点
-func (this *Server) Command(command string, ans *string) error {
-
 	return nil
 }

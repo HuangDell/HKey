@@ -11,6 +11,6 @@ func main() {
 			fmt.Println(err)
 		}
 	}()
-	n := server.NewNode("n1", "build/server/n1/config.json")
+	n := server.NewNode("build/server/n1/data/", "build/server/n1/config.json", 0)
 	n.Initialize()
 }

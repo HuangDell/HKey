@@ -2,5 +2,6 @@
   "protocol": "tcp",
   "ip": "localhost",
   "port": "5001",
+  "raft": "localhost:3306",
   "version": "v1.0"
 }

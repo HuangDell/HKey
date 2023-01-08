@@ -8,7 +8,6 @@ import (
 )
 
 // 设定数据内容存储路径
-const data_path = "build/server/data/"
 
 // handler 用于数据的持久性保存
 type handler struct {
@@ -16,7 +15,7 @@ type handler struct {
 	fp         *os.File
 }
 
-func newHandler() *handler {
+func newHandler(data_path string) *handler {
 	var err error
 	h := new(handler)
 	h.fp, err = os.OpenFile(data_path+"1.data", os.O_CREATE|os.O_RDWR, os.ModePerm)

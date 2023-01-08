@@ -13,7 +13,7 @@ type SetArgs struct {
 
 // Set 面向RPC的方法
 func (this *HKey) Set(args SetArgs, ans *string) error {
-	*ans = ""
+	*ans = "ok"
 	pos, err := this.find(args.Key)
 	if err != nil {
 		return err
@@ -62,4 +62,9 @@ func (this *HKey) Exists(key string, ans *string) error {
 		*ans = "(integer) 1"
 	}
 	return nil
+}
+
+// Show 打印cache中的内容
+func (this *HKey) Show(ans *string) {
+	*ans = showCache(this.cache)
 }
