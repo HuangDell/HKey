@@ -22,7 +22,7 @@ func main() {
 }
 
 func connect() {
-	config, err := pkg.ParseConfig("build/client/config.json")
+	config, err := pkg.ParseConfig("./config.json")
 	if err != nil {
 		panic(err)
 	}

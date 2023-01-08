@@ -23,7 +23,7 @@ type Server struct {
 func NewServer() *Server {
 	var err error
 	s := new(Server)
-	s.config, err = pkg.ParseConfig("build/server/config.json")
+	s.config, err = pkg.ParseConfig("./config.json")
 	fmt.Println("HKey 引导程序正在启动...")
 	if err != nil {
 		panic(err)
