@@ -45,10 +45,10 @@ func (c *Cache) Append(key string, value string) {
 
 // Get 从cache中读取结果
 func (c *Cache) Get(key string) string {
-	for _, ele := range c.items {
-		if ele != nil && ele.key == key {
-			ele.time++
-			return ele.value
+	for i := 0; i < c.index; i++ {
+		if c.items[i] != nil && c.items[i].key == key {
+			c.items[i].time++
+			return c.items[i].value
 		}
 	}
 	return "nil"
@@ -57,8 +57,9 @@ func (c *Cache) Get(key string) string {
 // Remove 删除指定键的元素
 func (c *Cache) Remove(key string) {
 	for index, ele := range c.items {
-		if ele.key == key {
+		if ele != nil && ele.key == key {
 			heap.Remove(c, index)
+			break
 		}
 	}
 
@@ -66,13 +67,17 @@ func (c *Cache) Remove(key string) {
 
 // Update 更新cache中的值
 func (c *Cache) Update(key string, value string) {
+	var exists bool
 	for _, ele := range c.items {
-		if ele.key == key {
+		if ele != nil && ele.key == key {
 			ele.time++
 			ele.value = value
+			exists = true
 		}
 	}
-
+	if exists == false { // 在缓存中还未记录
+		c.Append(key, value)
+	}
 }
 
 func (c *Cache) Pop() (v interface{}) {

@@ -1,5 +1,7 @@
 package server
 
+import "HKey/pkg"
+
 // 日志处理
 
 type AppendEntriesArgs struct {
@@ -59,7 +61,9 @@ func (rf *Raft) sendAppendEntries(server int, args AppendEntriesArgs, reply *App
 	if rf.role == LEADER && reply.Success {
 		rf.nextIndex[server] = args.PrevLogIndex + len(args.Entries) + 1
 		rf.matchIndex[server] = args.PrevLogIndex + len(args.Entries)
+		// pkg.DPrintf("节点%d接收了日志\n", server)
 	} else if rf.role == LEADER && !reply.Success { // 节点拒绝了日志
+		pkg.DPrintf("节点%d拒绝了日志，将在下次心跳时重新发送\n", server)
 		rf.nextIndex[server]--
 		// for rf.nextIndex[server] >= 0 && rf.log[rf.nextIndex[server]].Term == reply.Term {
 		// 	rf.nextIndex[server]-- // 寻找日志一致的索引

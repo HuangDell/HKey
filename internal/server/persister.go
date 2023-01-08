@@ -1,14 +1,15 @@
 package server
 
 import (
+	"io/ioutil"
 	"os"
 	"sync"
 )
 
 type Persister struct {
 	mu        sync.Mutex
+	data_path string
 	raftstate []byte
-	fp        *os.File
 }
 
 func clone(orig []byte) []byte {
@@ -26,16 +27,28 @@ func clone(orig []byte) []byte {
 // }
 
 func (ps *Persister) SaveRaftState(state []byte) {
+	fp, err := os.OpenFile(ps.data_path, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.ModePerm)
+	if err != nil {
+		panic(err)
+	}
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
 	ps.raftstate = clone(state)
-	ps.fp.Write(state)
+	fp.Write(state)
+	fp.Close()
 }
 
 func (ps *Persister) ReadRaftState() []byte {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	ps.fp.Read(ps.raftstate)
+	fp, err := os.OpenFile(ps.data_path, os.O_CREATE|os.O_RDONLY, os.ModePerm)
+	if err != nil {
+		panic(err)
+	}
+	ps.raftstate, err = ioutil.ReadAll(fp)
+	if err != nil {
+		panic(err)
+	}
 	return clone(ps.raftstate)
 }
 
@@ -48,7 +61,7 @@ func (ps *Persister) RaftStateSize() int {
 func NewPersister(data_path string) *Persister {
 	ps := &Persister{}
 	var err error
-	ps.fp, err = os.OpenFile(data_path+"log.data", os.O_CREATE|os.O_RDWR, os.ModePerm)
+	ps.data_path = data_path + "log.data"
 	if err != nil {
 		panic(err)
 	}

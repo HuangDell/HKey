@@ -30,7 +30,7 @@ const (
 
 func randTime() time.Duration {
 	diff := (electionTimeoutMax - electionTimeoutMin).Milliseconds()
-	return electionTimeoutMin + 2*time.Duration(rand.Intn(int(diff))*2)*time.Millisecond
+	return electionTimeoutMin + time.Duration(rand.Intn(int(diff)))*time.Millisecond
 }
 
 func wait(n int, ch chan bool) {
@@ -75,10 +75,11 @@ func (rf *Raft) GetState() (int, bool) {
 // 修改当前节点状态
 func (rf *Raft) keepOrFollow(term int) {
 	if term > rf.currentTerm { // 新的leader已经出现
-		pkg.DPrintf("新的Leader出现，转变成Follower")
+		pkg.DPrintf("接收到心跳或者选举，转变成Follower")
 		rf.currentTerm = term
 		rf.votedFor = -1 // 重置投票
 		rf.role = FOLLOWER
+		rf.persist() // 同时将日志写入文件
 	}
 }
 
@@ -98,19 +99,6 @@ func NewRaft(data_path string, address string, me int) *Raft {
 	}
 	rpc.HandleHTTP()
 	go http.ListenAndServe(address, nil)
-
-	// go func() {
-	// 	for rf.me != -1 {
-	// 		time.Sleep(checkTimeout)
-	// 		rf.mu.Lock()
-	// 		for rf.me != -1 && rf.commitIndex > rf.lastApplied {
-	// 			rf.lastApplied++
-	// 			applyCh <- ApplyMsg{Index: rf.lastApplied, Command: rf.log[rf.lastApplied].Command}
-	// 		}
-	// 		rf.mu.Unlock()
-	// 	}
-	// }()
-
 	return rf
 }
 
@@ -133,6 +121,7 @@ func (rf *Raft) Start(nodesInfo []InfoArgs, ans *string) error {
 	rf.timer.Reset(randTime())
 	// 然后开始工作
 	fmt.Printf("Raft网络 节点：%d构建完成\n", rf.me)
+	pkg.DPrintf("节点: %d, Term: %d, log: %v\n", rf.me, rf.currentTerm, rf.log)
 	go rf.work()
 	return nil
 }
@@ -162,11 +151,12 @@ func (rf *Raft) work() {
 	for rf.me != -1 {
 		<-rf.timer.C
 		switch rf.role {
-		case FOLLOWER: // 继续工作
-			pkg.DPrintf("Work as Follower\n")
+		case FOLLOWER:
+			pkg.DPrintf("Follower 工作中\n")
 			rf.mu.Lock()
 			rf.role = CANDIDATE
-			rf.timer.Reset(randTime())
+			random_time := randTime()
+			rf.timer.Reset(random_time)
 			rf.mu.Unlock()
 
 		case CANDIDATE: // 当变为candidate时要开始vote
@@ -174,8 +164,8 @@ func (rf *Raft) work() {
 			rf.mu.Lock()
 			rf.currentTerm++
 			rf.votedFor = rf.me
-			rf.persist()
 			rf.votes = 1
+			rf.persist() // 同时将日志写入文件
 			rf.timer.Reset(randTime())
 			m := len(rf.log)
 			rf.mu.Unlock()
@@ -191,9 +181,7 @@ func (rf *Raft) work() {
 				}
 				rf.mu.Unlock()
 			}
-
 			wait(len(rf.peers), ch) // 等待所有发收成功或超时
-
 			rf.mu.Lock()
 			if rf.me != -1 && rf.role == CANDIDATE && 2*rf.votes > len(rf.peers) { // 成功竞选
 				rf.role = LEADER
@@ -224,12 +212,11 @@ func (rf *Raft) work() {
 					}
 					reply := AppendEntriesReply{}
 					go rf.sendAppendEntries(i, args, &reply, ch)
+					rf.persist()
 				}
 				rf.mu.Unlock()
 			}
-
 			wait(len(rf.peers), ch) // 等待所有发收成功或超时
-
 			rf.mu.Lock()
 			N := m - 1
 			if rf.me != -1 && rf.role == LEADER && N > rf.commitIndex && rf.log[N].Term == rf.currentTerm {
@@ -260,10 +247,15 @@ func (rf *Raft) Command(command string, ans *string) error {
 			return err
 		}
 	} else {
-		*ans = rf.handleCommand(command)
-		rf.log = append(rf.log, LogItem{Command: command, Term: rf.currentTerm}) // 加入日志，在下次心跳时分发给节点
+		*ans = rf.handleCommand(command) // 立即处理，保证效率
 	}
 	return nil
+}
+
+// PrintLog 打印日志，仅供调试
+func (rf *Raft) PrintLog() {
+	fmt.Printf("节点:%d Term:%d\n", rf.me, rf.currentTerm)
+	fmt.Printf("Log:%v\n", rf.log)
 }
 
 func (rf *Raft) handleCommand(command string) string {
@@ -273,10 +265,16 @@ func (rf *Raft) handleCommand(command string) string {
 	switch action {
 	case "set":
 		ans = rf.set(words)
+		if ans != "error arguments" {
+			rf.log = append(rf.log, LogItem{Command: command, Term: rf.currentTerm}) // 加入日志，在下次心跳时分发给节点
+		}
 	case "get":
 		ans = rf.get(words)
 	case "del":
 		ans = rf.del(words)
+		if ans != "error arguments" {
+			rf.log = append(rf.log, LogItem{Command: command, Term: rf.currentTerm}) // 加入日志，在下次心跳时分发给节点
+		}
 	case "exists":
 		ans = rf.exists(words)
 	case "show":

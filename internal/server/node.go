@@ -4,8 +4,10 @@ import (
 	"HKey/pkg"
 	"bufio"
 	"fmt"
+	"math/rand"
 	"net/rpc"
 	"os"
+	"time"
 )
 
 /**
@@ -35,6 +37,7 @@ func NewNode(data_path string, configPath string, me int) *Node {
 	s.name = "node" + string(rune(me))
 	s.config, err = pkg.ParseConfig(configPath)
 	s.raft = NewRaft(data_path, s.config.GetAddress(), me)
+	rand.Seed(time.Now().Unix())
 	fmt.Println("HKey 正在启动...")
 	if err != nil {
 		panic(err)
@@ -55,15 +58,19 @@ func (this *Node) Initialize() {
 
 	conn, err := rpc.DialHTTP(this.config.Protocol, this.config.Raft) // 控制中心连接节点 节点上的rpc调用是与键值系统相关的
 	if err != nil {
-		fmt.Printf("连接集群失败%s\n", err)
+		fmt.Printf("连接集群失败%s\n正在以独立节点形式运行...\n", err)
+		this.raft.role = LEADER
+	} else {
+		err = conn.Call(Join, args, &reply)
+		fmt.Println("成功连接集群!")
 	}
-	err = conn.Call(Join, args, &reply)
-	fmt.Println("成功连接集群!")
 	for {
 		bytes, _, _ := reader.ReadLine()
 		input := string(bytes)
 		if input == "exit" {
 			break
+		} else if input == "log" {
+			this.raft.PrintLog()
 		}
 	}
 	fmt.Println("bye")
