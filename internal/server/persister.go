@@ -18,14 +18,6 @@ func clone(orig []byte) []byte {
 	return x
 }
 
-// func (ps *Persister) Copy() *Persister {
-// 	ps.mu.Lock()
-// 	defer ps.mu.Unlock()
-// 	np := NewPersister()
-// 	np.raftstate = ps.raftstate
-// 	return np
-// }
-
 func (ps *Persister) SaveRaftState(state []byte) {
 	fp, err := os.OpenFile(ps.data_path, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.ModePerm)
 	if err != nil {
